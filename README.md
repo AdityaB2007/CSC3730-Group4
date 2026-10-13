@@ -1,7 +1,7 @@
 # Movie Recommendation System - Fall 2026 ML Project
 
 ## Abstract:
-This project will compare two approaches to movie recommendations: popularity-based recommendations and personalized recommendations. The popularity-based approach will recommend movies that have been rated by a large portion of users and have a high proportion of positive ratings. The personalized approach will recommend movies based on genre similarities between movies a user has previously rated (positively) and movies that user has not yet rated. Comparing these approaches will help us better understand how to weigh popularity and personalized preferences when developing an optimized recommendation algorithm.\\
+This project will compare two approaches to movie recommendations: popularity-based recommendations and personalized recommendations. The popularity-based approach will recommend movies that have been rated by a large portion of users and have a high proportion of positive ratings. The personalized approach will recommend movies based on genre similarities between movies a user has previously rated (positively) and movies that user has not yet rated. Comparing these approaches will help us better understand how to weigh popularity and personalized preferences when developing an optimized recommendation algorithm.
 <br><br>
 The project will use the GroupLens MovieLens 100K dataset, which contains 100,000 movie ratings from 943 users across 1,682 movies.
 <br><br>
