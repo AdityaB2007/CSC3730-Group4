@@ -16,7 +16,6 @@ We expect personalized recommendations to be more relevant to individual users t
   <li>Nicolas Chrest</li>
   <li>Stella Levy</li>
   <li>Keith Mayle</li>
-  <li>Mia Miranda</li>
 </ul>
 
 Work in progress...
