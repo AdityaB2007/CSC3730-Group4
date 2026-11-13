@@ -51,6 +51,10 @@ def test_no_positive_ratings(sample_movies, sample_ratings):
         "movie_id": [10, 20],
         "rating": [2, 3]
     })
+    model = ContentBasedRecommender(sample_movies)
+    results = model.recommend(no_positive, user_id=1, n=10)
+    assert results.empty
+    assert list(results.columns) == ["movie_id", "title", "similarity"]
 
 def test_invalid_user(sample_movies, sample_ratings):
     model = ContentBasedRecommender(sample_movies)

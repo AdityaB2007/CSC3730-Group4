@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.metrics.pairwise import cosine_similarity
-from src.data import GENRE_COLUMNS
+from src.data import GENRE_COLS
 
 class ContentBasedRecommender:
     """
@@ -14,7 +14,16 @@ class ContentBasedRecommender:
 
         self.genre_matrix = (
             self.movies
-            .set_index("movie_id")[GENRE_COLUMNS]
+            .set_index("movie_id")[GENRE_COLS]
+        )
+
+        # Movie-to-movie similarity only depends on genres, so compute it
+        # once here instead of on every recommend() call. This matters when
+        # the evaluation asks for recommendations for every user.
+        self.similarity = pd.DataFrame(
+            cosine_similarity(self.genre_matrix),
+            index=self.genre_matrix.index,
+            columns=self.genre_matrix.index
         )
 
     def recommend(self, ratings, user_id, n=10, threshold=4):
@@ -68,20 +77,12 @@ class ContentBasedRecommender:
                 columns=["movie_id", "title", "similarity"]
             )
 
-        positive_vectors = self.genre_matrix.loc[
-            positive_movies
-        ]
-
-        unrated_vectors = self.genre_matrix.loc[
-            unrated_movies
-        ]
-
-        # Calculate similarity between each candidate and
+        # Look up similarity between each candidate and
         # every positively rated movie.
-        similarity_matrix = cosine_similarity(
-            unrated_vectors,
-            positive_vectors
-        )
+        similarity_matrix = self.similarity.loc[
+            unrated_movies,
+            positive_movies
+        ].to_numpy()
 
         # Average similarities across positive movies.
         similarity_scores = similarity_matrix.mean(axis=1)
@@ -99,9 +100,11 @@ class ContentBasedRecommender:
         )
 
         # Rank recommendations by similarity.
+        # Stable sort so ties always come back in the same order.
         recommendations = recommendations.sort_values(
             by="similarity",
-            ascending=False
+            ascending=False,
+            kind="stable"
         )
 
         return recommendations[
