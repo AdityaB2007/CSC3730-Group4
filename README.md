@@ -1,15 +1,16 @@
 # Movie Recommendation System - Fall 2026 ML Project
 
-## Abstract:
-This project will compare two approaches to movie recommendations: popularity-based recommendations and personalized recommendations. The popularity-based approach will recommend movies that have been rated by a large portion of users and have a high proportion of positive ratings. The personalized approach will recommend movies based on genre similarities between movies a user has previously rated (positively) and movies that user has not yet rated. Comparing these approaches will help us better understand how to weigh popularity and personalized preferences when developing an optimized recommendation algorithm.
-<br><br>
-The project will use the GroupLens MovieLens 100K dataset, which contains 100,000 movie ratings from 943 users across 1,682 movies.
-<br><br>
-The model will use cosine similarity to compare movies based on the similarities in their subsets of genre classifications. It will use these similarity scores to recommend unrated movies that are similar to movies the user has rated positively. The results will be compared against the popularity-based approach.
-<br><br>
-We expect personalized recommendations to be more relevant to individual users than recommendations based solely on popularity. The results may help us determine how to balance popularity and personalized preferences in a recommendation algorithm.
+## Abstract
 
-### Contributors:
+This project investigates the effectiveness of popularity-based, personalized, and hybrid approaches to movie recommendation. The popularity-based approach ranks movies according to their rating frequency and proportion of positive ratings, while the personalized approach recommends movies based on genre similarities between movies a user has previously rated positively and movies they have not yet rated. The hybrid approach combines the popularity and personalized recommendation scores using different weighting factors to investigate how the balance between overall popularity and individual preferences affects recommendation performance.
+
+The project uses the GroupLens MovieLens 100K dataset, consisting of 100,000 ratings from 943 users across 1,682 movies. For personalized recommendations, cosine similarity is used to compare movies based on their genre classifications and identify unrated movies that are similar to a user's positively rated movies.
+
+The three approaches will be evaluated using a consistent training and testing methodology. For the hybrid approach, multiple weighting combinations will be tested to determine how different contributions from popularity and personalized scores affect recommendation performance. The results will be compared to assess whether combining both approaches provides an improvement over either method individually.
+
+We hypothesize that personalized recommendations will better reflect individual user preferences than popularity-based recommendations, while the hybrid approach may provide a balance between individual relevance and broader user preferences.
+
+### Contributors
 <ul>
   <li>Seth Auzenne</li>
   <li>Aditya Baisakh</li>
