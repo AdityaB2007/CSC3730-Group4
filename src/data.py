@@ -4,6 +4,7 @@ The purpose of this file is to handle consistent data loading.
 
 from pathlib import Path
 import io
+import ssl
 import urllib.request
 import zipfile
 
@@ -50,26 +51,16 @@ def download_movielens(data_dir=DEFAULT_DATA_DIR, url=MOVIELENS_URL):
         return data_dir
 
     print(f"Downloading MovieLens 100K from {url} ...")
-    context = None
+    # Use certifi's CA bundle when available (helps on some macOS Python
+    # installs), otherwise the system default. Certificate checking is never
+    # turned off: if it fails, download the zip by hand (see README).
     try:
         import certifi
-        import ssl
         context = ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        try:
-            import ssl
-            context = ssl.create_default_context()
-        except Exception:
-            context = None
+    except ImportError:
+        context = ssl.create_default_context()
 
-    try:
-        response = urllib.request.urlopen(url, context=context) if context else urllib.request.urlopen(url)
-    except Exception:
-        import ssl
-        unverified = ssl._create_unverified_context()
-        response = urllib.request.urlopen(url, context=unverified)
-
-    with response:
+    with urllib.request.urlopen(url, context=context) as response:
         archive = zipfile.ZipFile(io.BytesIO(response.read()))
 
     # The zip contains a top-level "ml-100k/" folder; extract next to it.
