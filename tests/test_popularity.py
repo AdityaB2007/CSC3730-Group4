@@ -76,3 +76,10 @@ def test_ranking_cache_is_per_ratings_and_threshold(movies, ratings):
     assert model.rank_movies(ratings, threshold=2)["movie_id"].tolist() == [1, 2, 4]
     only_movie_4 = ratings[ratings["movie_id"] == 4]
     assert model.rank_movies(only_movie_4)["movie_id"].tolist() == [4]
+
+
+def test_returns_empty_when_no_movies_meet_min_ratings(movies, ratings):
+    model = PopularityRecommender(movies, min_ratings=100)
+    results = model.recommend(ratings, user_id=1, n=10)
+    assert results.empty
+    assert list(results.columns) == ["movie_id", "title", "num_ratings", "positive_ratio"]

@@ -1,6 +1,6 @@
 import pytest
 
-from src.data import GENRE_COLS, load_movielens
+from src.data import GENRE_COLS, download_movielens, load_movielens
 
 
 def write_tiny_dataset(folder):
@@ -30,3 +30,9 @@ def test_load_movielens(tmp_path):
 def test_missing_dataset_gives_helpful_error(tmp_path):
     with pytest.raises(FileNotFoundError, match="download_data.py"):
         load_movielens(tmp_path / "nowhere")
+
+
+def test_download_movielens_skips_when_present(tmp_path):
+    write_tiny_dataset(tmp_path)
+    returned = download_movielens(tmp_path, url="https://invalid.example.test/unused.zip")
+    assert returned == tmp_path
