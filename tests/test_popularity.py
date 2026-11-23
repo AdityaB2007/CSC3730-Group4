@@ -49,7 +49,10 @@ def test_respects_n(movies, ratings):
 
 
 def test_invalid_inputs(movies, ratings):
-    model = PopularityRecommender(movies)
+    with pytest.raises(ValueError):
+        PopularityRecommender(movies, min_ratings=0)
+
+    model = PopularityRecommender(movies, min_ratings=2)
     with pytest.raises(ValueError):
         model.recommend(ratings, user_id=999)
     with pytest.raises(ValueError):
@@ -57,4 +60,19 @@ def test_invalid_inputs(movies, ratings):
     with pytest.raises(ValueError):
         model.recommend(ratings, user_id=1, threshold=6)
     with pytest.raises(ValueError):
-        PopularityRecommender(movies, min_ratings=0)
+        model.rank_movies(ratings, threshold=6)
+
+
+def test_ranking_cache_is_per_ratings_and_threshold(movies, ratings):
+    model = PopularityRecommender(movies, min_ratings=2)
+    first = model.rank_movies(ratings, threshold=4)
+
+    # Same inputs give the same answer, and editing the returned
+    # frame doesn't corrupt the cache.
+    first.loc[:, "positive_ratio"] = -1
+    assert model.rank_movies(ratings, threshold=4)["positive_ratio"].min() >= 0
+
+    # A different threshold or a different ratings frame is recomputed.
+    assert model.rank_movies(ratings, threshold=2)["movie_id"].tolist() == [1, 2, 4]
+    only_movie_4 = ratings[ratings["movie_id"] == 4]
+    assert model.rank_movies(only_movie_4)["movie_id"].tolist() == [4]

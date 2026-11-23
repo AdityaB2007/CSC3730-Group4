@@ -99,12 +99,19 @@ class ContentBasedRecommender:
             how="left"
         )
 
-        # Rank recommendations by similarity.
-        # Stable sort so ties always come back in the same order.
+        # Many movies share the exact same genre vector, so they tie on
+        # similarity. Break ties by how often each movie was rated (in the
+        # ratings we were given), then by movie_id so results are
+        # deterministic. Without this, ties fall back to movie_id alone and
+        # the top-n is effectively arbitrary.
+        rating_counts = ratings["movie_id"].value_counts()
+        recommendations["num_ratings"] = (
+            recommendations["movie_id"].map(rating_counts).fillna(0)
+        )
+
         recommendations = recommendations.sort_values(
-            by="similarity",
-            ascending=False,
-            kind="stable"
+            by=["similarity", "num_ratings", "movie_id"],
+            ascending=[False, False, True]
         )
 
         return recommendations[
