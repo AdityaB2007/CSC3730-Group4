@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from src.content_based import ContentBasedRecommender
@@ -28,6 +29,31 @@ class HybridRecommender:
         self.content = ContentBasedRecommender(movies)
         self.popularity = PopularityRecommender(movies, min_ratings=min_ratings)
 
+        # Cache aligned popularity scores per (ratings, threshold) pair to avoid
+        # rebuilding Series mappings across repeated per-user evaluation calls.
+        self._cache_ratings = None
+        self._cache_threshold = None
+        self._cache_pop_scores = None
+
+    def _get_popularity_scores(self, ratings, threshold):
+        if ratings is self._cache_ratings and threshold == self._cache_threshold:
+            return self._cache_pop_scores
+
+        pop_series = (
+            self.popularity.rank_movies(ratings, threshold=threshold)
+            .set_index("movie_id")["positive_ratio"]
+        )
+        aligned = (
+            pd.Series(self.content._movie_ids)
+            .map(pop_series)
+            .fillna(0.0)
+            .to_numpy(dtype=float)
+        )
+        self._cache_ratings = ratings
+        self._cache_threshold = threshold
+        self._cache_pop_scores = aligned
+        return aligned
+
     def recommend(self, ratings, user_id, n=10, threshold=4):
         """
         Recommend unrated movies ranked by the blended score.
@@ -49,64 +75,51 @@ class HybridRecommender:
         if n <= 0:
             raise ValueError("n must be positive.")
 
-        if user_id not in ratings["user_id"].values:
-            raise ValueError("User ID not found.")
-
-        rated_movies = ratings.loc[
-            ratings["user_id"] == user_id, "movie_id"
-        ]
-
-        candidates = self.movies[
-            ~self.movies["movie_id"].isin(rated_movies)
-        ]
-
-        # Score every candidate, not just each model's top n.
-        content_scores = self.content.recommend(
-            ratings, user_id, n=len(self.movies), threshold=threshold
-        ).set_index("movie_id")["similarity"]
-
-        popularity_scores = self.popularity.rank_movies(
-            ratings, threshold=threshold
-        ).set_index("movie_id")["positive_ratio"]
-
-        # Movies with no score (no positive ratings for content,
-        # too few ratings for popularity) get 0.
-        recommendations = candidates.assign(
-            content_score=candidates["movie_id"].map(content_scores).fillna(0.0),
-            popularity_score=candidates["movie_id"].map(popularity_scores).fillna(0.0)
+        unrated_mask, raw_content, _ = self.content._score_unrated(
+            ratings, user_id, threshold=threshold
         )
 
-        # Rescale both to 0-1 so alpha means the same thing for every user.
-        for col in ["content_score", "popularity_score"]:
-            recommendations[col] = min_max_scale(recommendations[col])
+        if not unrated_mask.any():
+            return pd.DataFrame(
+                columns=["movie_id", "title", "content_score", "popularity_score", "score"]
+            )
 
-        recommendations["score"] = (
-            self.alpha * recommendations["content_score"]
-            + (1 - self.alpha) * recommendations["popularity_score"]
+        raw_popularity = self._get_popularity_scores(ratings, threshold)[unrated_mask]
+
+        # Rescale both to 0-1 so alpha means the same thing for every user.
+        content_score = min_max_scale(raw_content)
+        popularity_score = min_max_scale(raw_popularity)
+
+        score = (
+            self.alpha * content_score
+            + (1 - self.alpha) * popularity_score
         )
 
         # Break score ties by how often a movie was rated, then movie_id,
         # matching ContentBasedRecommender.
-        recommendations["num_ratings"] = (
-            recommendations["movie_id"]
-            .map(ratings["movie_id"].value_counts())
-            .fillna(0)
-        )
+        cand_ids = self.content._movie_ids[unrated_mask]
+        cand_titles = self.content._titles[unrated_mask]
+        cand_counts = self.content._cache_counts[unrated_mask]
+        top_order = np.lexsort((cand_ids, -cand_counts, -score))[:n]
 
-        recommendations = recommendations.sort_values(
-            by=["score", "num_ratings", "movie_id"],
-            ascending=[False, False, True]
-        )
-
-        return recommendations[
-            ["movie_id", "title", "content_score", "popularity_score", "score"]
-        ].head(n).reset_index(drop=True)
+        return pd.DataFrame({
+            "movie_id": cand_ids[top_order],
+            "title": cand_titles[top_order],
+            "content_score": content_score[top_order],
+            "popularity_score": popularity_score[top_order],
+            "score": score[top_order],
+        })
 
 
 def min_max_scale(values):
+    if len(values) == 0:
+        return pd.Series(dtype=float) if isinstance(values, pd.Series) else np.array([], dtype=float)
+
     low, high = values.min(), values.max()
 
     if high == low:
-        return pd.Series(0.0, index=values.index)
+        if isinstance(values, pd.Series):
+            return pd.Series(0.0, index=values.index)
+        return np.zeros(len(values), dtype=float)
 
     return (values - low) / (high - low)
