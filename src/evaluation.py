@@ -9,6 +9,8 @@ recommendations are movies the user went on to rate positively.
 import numpy as np
 import pandas as pd
 
+from src.data import GENRE_COLS
+
 
 def train_test_split_by_time(ratings, test_fraction=0.2):
     """
@@ -169,3 +171,118 @@ def compare_models(models, train, test, k=10, threshold=4, users=None):
         })
 
     return pd.DataFrame(summary).set_index("model")
+
+
+def evaluate_by_user_activity(models, train, test, k=10, threshold=4, quantiles=3):
+    """
+    Break down metrics across user training-activity buckets.
+    """
+    if quantiles < 1:
+        raise ValueError("quantiles must be at least 1.")
+
+    liked_users = set(test.loc[test["rating"] >= threshold, "user_id"])
+    train_counts = train.groupby("user_id").size()
+    users = sorted(u for u in liked_users if u in train_counts.index)
+
+    columns = [
+        "segment",
+        "model",
+        "users_evaluated",
+        "min_train_ratings",
+        "max_train_ratings",
+        f"precision@{k}",
+        f"recall@{k}",
+        f"hit_rate@{k}",
+        f"ndcg@{k}",
+        f"mrr@{k}",
+    ]
+    if not users:
+        return pd.DataFrame(columns=columns)
+
+    counts = train_counts.loc[users]
+    tier_ids = pd.qcut(counts, q=quantiles, labels=False, duplicates="drop")
+    n_bins = int(tier_ids.nunique())
+
+    if n_bins == 3:
+        labels = ["Light", "Medium", "Heavy"]
+    elif n_bins == 2:
+        labels = ["Light", "Heavy"]
+    elif n_bins == 1:
+        labels = ["All"]
+    else:
+        labels = [f"Tier {i + 1}" for i in range(n_bins)]
+
+    bins = sorted(tier_ids.unique())
+    bin_map = {b: labels[i] for i, b in enumerate(bins)}
+    user_segment = tier_ids.map(bin_map)
+
+    rows = []
+    for name, model in models.items():
+        res = evaluate(model, train, test, k=k, threshold=threshold, users=users)
+        res["segment"] = res["user_id"].map(user_segment)
+        for seg in [bin_map[b] for b in bins]:
+            sub = res[res["segment"] == seg]
+            seg_counts = counts.loc[sub["user_id"]]
+            rows.append({
+                "segment": seg,
+                "model": name,
+                "users_evaluated": len(sub),
+                "min_train_ratings": int(seg_counts.min()),
+                "max_train_ratings": int(seg_counts.max()),
+                f"precision@{k}": sub["precision"].mean(),
+                f"recall@{k}": sub["recall"].mean(),
+                f"hit_rate@{k}": sub["hit"].mean(),
+                f"ndcg@{k}": sub["ndcg"].mean(),
+                f"mrr@{k}": sub["mrr"].mean(),
+            })
+
+    return pd.DataFrame(rows, columns=columns)
+
+
+def user_genre_profile(ratings, movies, user_id, threshold=4):
+    """
+    Return a summary of a user's rating counts and liked genres.
+    """
+    if not 1 <= threshold <= 5:
+        raise ValueError("Threshold must be between 1 and 5.")
+
+    if user_id not in ratings["user_id"].values:
+        raise ValueError("User ID not found.")
+
+    user_ratings = ratings[ratings["user_id"] == user_id]
+    liked = user_ratings[user_ratings["rating"] >= threshold]
+    genre_cols = [c for c in GENRE_COLS if c in movies.columns]
+    merged = liked[["movie_id"]].merge(
+        movies[["movie_id", *genre_cols]], on="movie_id", how="inner"
+    )
+    genre_counts = merged[genre_cols].sum().sort_values(ascending=False)
+    genre_counts = genre_counts[genre_counts > 0].astype(int)
+
+    return {
+        "user_id": int(user_id),
+        "total_ratings": int(len(user_ratings)),
+        "positive_ratings": int(len(liked)),
+        "mean_rating": float(user_ratings["rating"].mean()),
+        "genre_counts": genre_counts,
+    }
+
+
+def compare_user_recommendations(models, ratings, movies, user_id, n=10, threshold=4):
+    """
+    Show top-n recommended movie titles side by side across models.
+    """
+    title_map = movies.set_index("movie_id")["title"]
+    columns = {}
+    for name, model in models.items():
+        recs = model.recommend(ratings, user_id=user_id, n=n, threshold=threshold)
+        if "title" in recs.columns:
+            titles = recs["title"].tolist()
+        else:
+            titles = recs["movie_id"].map(title_map).fillna("").tolist()
+        if len(titles) < n:
+            titles.extend([""] * (n - len(titles)))
+        columns[name] = titles[:n]
+
+    table = pd.DataFrame(columns, index=range(1, n + 1))
+    table.index.name = "rank"
+    return table
