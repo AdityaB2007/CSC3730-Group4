@@ -61,8 +61,14 @@ def evaluate(model, train, test, k=10, threshold=4, users=None):
 
     Returns:
         DataFrame with one row per user: precision, recall, hit,
-        and the list of recommended movie_ids.
+        ndcg, mrr, and the list of recommended movie_ids.
     """
+    if k <= 0:
+        raise ValueError("k must be positive.")
+
+    if not 1 <= threshold <= 5:
+        raise ValueError("Threshold must be between 1 and 5.")
+
     liked = (
         test[test["rating"] >= threshold]
         .groupby("user_id")["movie_id"]
@@ -73,6 +79,7 @@ def evaluate(model, train, test, k=10, threshold=4, users=None):
     if users is None:
         users = [u for u in liked.index if u in train_users]
 
+    discounts = 1.0 / np.log2(np.arange(2, k + 2))
     rows = []
     for user_id in users:
         relevant = liked.get(user_id, set())
@@ -81,21 +88,53 @@ def evaluate(model, train, test, k=10, threshold=4, users=None):
 
         recs = model.recommend(
             train, user_id=user_id, n=k, threshold=threshold
-        )["movie_id"].tolist()
+        )["movie_id"].tolist()[:k]
 
         hits = len(relevant.intersection(recs))
+        dcg = sum(discounts[i] for i, m in enumerate(recs) if m in relevant)
+        idcg = float(discounts[:min(len(relevant), k)].sum())
+        mrr = next(
+            (1.0 / rank for rank, m in enumerate(recs, start=1) if m in relevant),
+            0.0,
+        )
+
         rows.append({
             "user_id": user_id,
             "precision": hits / k,
             "recall": hits / len(relevant),
             "hit": hits > 0,
+            "ndcg": dcg / idcg if idcg > 0 else 0.0,
+            "mrr": mrr,
             "recommended": recs,
         })
 
     return pd.DataFrame(
         rows,
-        columns=["user_id", "precision", "recall", "hit", "recommended"]
+        columns=["user_id", "precision", "recall", "hit", "ndcg", "mrr", "recommended"]
     )
+
+
+def _personalization(recommended_lists):
+    lists = [list(dict.fromkeys(r)) for r in recommended_lists if len(r) > 0]
+    n_users = len(lists)
+    if n_users < 2:
+        return 0.0
+
+    item_cols = {}
+    for recs in lists:
+        for mid in recs:
+            if mid not in item_cols:
+                item_cols[mid] = len(item_cols)
+
+    mat = np.zeros((n_users, len(item_cols)), dtype=float)
+    for row, recs in enumerate(lists):
+        mat[row, [item_cols[m] for m in recs]] = 1.0
+
+    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+    normed = mat / norms
+    sim = normed @ normed.T
+    avg_sim = (sim.sum() - n_users) / (n_users * (n_users - 1))
+    return float(np.clip(1.0 - avg_sim, 0.0, 1.0))
 
 
 def compare_models(models, train, test, k=10, threshold=4, users=None):
@@ -107,8 +146,7 @@ def compare_models(models, train, test, k=10, threshold=4, users=None):
 
     Returns:
         DataFrame with one row per model: precision@k, recall@k,
-        hit_rate@k, and catalog coverage (share of all movies that
-        were recommended to at least one user).
+        hit_rate@k, ndcg@k, mrr@k, coverage, and personalization.
     """
     catalog_size = pd.concat([train["movie_id"], test["movie_id"]]).nunique()
 
@@ -124,7 +162,10 @@ def compare_models(models, train, test, k=10, threshold=4, users=None):
             f"precision@{k}": results["precision"].mean(),
             f"recall@{k}": results["recall"].mean(),
             f"hit_rate@{k}": results["hit"].mean(),
-            "coverage": len(recommended) / catalog_size,
+            f"ndcg@{k}": results["ndcg"].mean(),
+            f"mrr@{k}": results["mrr"].mean(),
+            "coverage": len(recommended) / catalog_size if catalog_size > 0 else 0.0,
+            "personalization": _personalization(results["recommended"]),
         })
 
     return pd.DataFrame(summary).set_index("model")

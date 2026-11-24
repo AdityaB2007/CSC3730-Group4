@@ -1,7 +1,13 @@
+import numpy as np
 import pandas as pd
 import pytest
 
-from src.evaluation import compare_models, evaluate, train_test_split_by_time
+from src.evaluation import (
+    _personalization,
+    compare_models,
+    evaluate,
+    train_test_split_by_time,
+)
 
 
 @pytest.fixture
@@ -70,3 +76,37 @@ def test_compare_models(ratings):
     assert summary.loc["good", "hit_rate@2"] == pytest.approx(1.0)
     assert summary.loc["bad", "hit_rate@2"] == pytest.approx(0.0)
     assert summary.loc["good", "coverage"] == pytest.approx(2 / 10)
+    assert summary.loc["good", "ndcg@2"] > summary.loc["bad", "ndcg@2"]
+    assert summary.loc["good", "mrr@2"] > summary.loc["bad", "mrr@2"]
+    assert summary.loc["good", "personalization"] == pytest.approx(0.0)
+
+
+def test_ndcg_and_mrr(ratings):
+    train, test = train_test_split_by_time(ratings, test_fraction=0.2)
+    model = FixedRecommender([7, 5, 9])
+    results = evaluate(model, train, test, k=3).set_index("user_id")
+
+    assert results.loc[1, "mrr"] == pytest.approx(0.5)
+    assert results.loc[1, "ndcg"] == pytest.approx(1.0 / np.log2(3))
+    assert results.loc[2, "mrr"] == pytest.approx(1.0 / 3.0)
+    assert results.loc[2, "ndcg"] == pytest.approx(1.0 / np.log2(4))
+
+    miss = evaluate(FixedRecommender([7, 8]), train, test, k=2).set_index("user_id")
+    assert (miss["ndcg"] == 0.0).all()
+    assert (miss["mrr"] == 0.0).all()
+
+
+def test_personalization():
+    assert _personalization([[1, 2], [1, 2], [1, 2]]) == pytest.approx(0.0)
+    assert _personalization([[1, 2], [3, 4], [5, 6]]) == pytest.approx(1.0)
+    assert _personalization([[1, 2]]) == pytest.approx(0.0)
+    assert _personalization([[], [1, 2]]) == pytest.approx(0.0)
+
+
+def test_evaluate_invalid_inputs(ratings):
+    train, test = train_test_split_by_time(ratings, test_fraction=0.2)
+    model = FixedRecommender([5])
+    with pytest.raises(ValueError):
+        evaluate(model, train, test, k=0)
+    with pytest.raises(ValueError):
+        evaluate(model, train, test, threshold=6)
