@@ -85,9 +85,17 @@ class HybridRecommender:
             + (1 - self.alpha) * recommendations["popularity_score"]
         )
 
+        # Break score ties by how often a movie was rated, then movie_id,
+        # matching ContentBasedRecommender.
+        recommendations["num_ratings"] = (
+            recommendations["movie_id"]
+            .map(ratings["movie_id"].value_counts())
+            .fillna(0)
+        )
+
         recommendations = recommendations.sort_values(
-            by=["score", "movie_id"],
-            ascending=[False, True]
+            by=["score", "num_ratings", "movie_id"],
+            ascending=[False, False, True]
         )
 
         return recommendations[
