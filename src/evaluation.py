@@ -9,6 +9,8 @@ recommendations are movies the user went on to rate positively.
 import numpy as np
 import pandas as pd
 
+from src.data import GENRE_COLS
+
 
 def train_test_split_by_time(ratings, test_fraction=0.2):
     """
@@ -61,8 +63,14 @@ def evaluate(model, train, test, k=10, threshold=4, users=None):
 
     Returns:
         DataFrame with one row per user: precision, recall, hit,
-        and the list of recommended movie_ids.
+        ndcg, mrr, and the list of recommended movie_ids.
     """
+    if k <= 0:
+        raise ValueError("k must be positive.")
+
+    if not 1 <= threshold <= 5:
+        raise ValueError("Threshold must be between 1 and 5.")
+
     liked = (
         test[test["rating"] >= threshold]
         .groupby("user_id")["movie_id"]
@@ -73,6 +81,7 @@ def evaluate(model, train, test, k=10, threshold=4, users=None):
     if users is None:
         users = [u for u in liked.index if u in train_users]
 
+    discounts = 1.0 / np.log2(np.arange(2, k + 2))
     rows = []
     for user_id in users:
         relevant = liked.get(user_id, set())
@@ -81,21 +90,53 @@ def evaluate(model, train, test, k=10, threshold=4, users=None):
 
         recs = model.recommend(
             train, user_id=user_id, n=k, threshold=threshold
-        )["movie_id"].tolist()
+        )["movie_id"].tolist()[:k]
 
         hits = len(relevant.intersection(recs))
+        dcg = sum(discounts[i] for i, m in enumerate(recs) if m in relevant)
+        idcg = float(discounts[:min(len(relevant), k)].sum())
+        mrr = next(
+            (1.0 / rank for rank, m in enumerate(recs, start=1) if m in relevant),
+            0.0,
+        )
+
         rows.append({
             "user_id": user_id,
             "precision": hits / k,
             "recall": hits / len(relevant),
             "hit": hits > 0,
+            "ndcg": dcg / idcg if idcg > 0 else 0.0,
+            "mrr": mrr,
             "recommended": recs,
         })
 
     return pd.DataFrame(
         rows,
-        columns=["user_id", "precision", "recall", "hit", "recommended"]
+        columns=["user_id", "precision", "recall", "hit", "ndcg", "mrr", "recommended"]
     )
+
+
+def _personalization(recommended_lists):
+    lists = [list(dict.fromkeys(r)) for r in recommended_lists if len(r) > 0]
+    n_users = len(lists)
+    if n_users < 2:
+        return 0.0
+
+    item_cols = {}
+    for recs in lists:
+        for mid in recs:
+            if mid not in item_cols:
+                item_cols[mid] = len(item_cols)
+
+    mat = np.zeros((n_users, len(item_cols)), dtype=float)
+    for row, recs in enumerate(lists):
+        mat[row, [item_cols[m] for m in recs]] = 1.0
+
+    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+    normed = mat / norms
+    sim = normed @ normed.T
+    avg_sim = (sim.sum() - n_users) / (n_users * (n_users - 1))
+    return float(np.clip(1.0 - avg_sim, 0.0, 1.0))
 
 
 def compare_models(models, train, test, k=10, threshold=4, users=None):
@@ -107,8 +148,7 @@ def compare_models(models, train, test, k=10, threshold=4, users=None):
 
     Returns:
         DataFrame with one row per model: precision@k, recall@k,
-        hit_rate@k, and catalog coverage (share of all movies that
-        were recommended to at least one user).
+        hit_rate@k, ndcg@k, mrr@k, coverage, and personalization.
     """
     catalog_size = pd.concat([train["movie_id"], test["movie_id"]]).nunique()
 
@@ -124,7 +164,125 @@ def compare_models(models, train, test, k=10, threshold=4, users=None):
             f"precision@{k}": results["precision"].mean(),
             f"recall@{k}": results["recall"].mean(),
             f"hit_rate@{k}": results["hit"].mean(),
-            "coverage": len(recommended) / catalog_size,
+            f"ndcg@{k}": results["ndcg"].mean(),
+            f"mrr@{k}": results["mrr"].mean(),
+            "coverage": len(recommended) / catalog_size if catalog_size > 0 else 0.0,
+            "personalization": _personalization(results["recommended"]),
         })
 
     return pd.DataFrame(summary).set_index("model")
+
+
+def evaluate_by_user_activity(models, train, test, k=10, threshold=4, quantiles=3):
+    """
+    Break down metrics across user training-activity buckets.
+    """
+    if quantiles < 1:
+        raise ValueError("quantiles must be at least 1.")
+
+    liked_users = set(test.loc[test["rating"] >= threshold, "user_id"])
+    train_counts = train.groupby("user_id").size()
+    users = sorted(u for u in liked_users if u in train_counts.index)
+
+    columns = [
+        "segment",
+        "model",
+        "users_evaluated",
+        "min_train_ratings",
+        "max_train_ratings",
+        f"precision@{k}",
+        f"recall@{k}",
+        f"hit_rate@{k}",
+        f"ndcg@{k}",
+        f"mrr@{k}",
+    ]
+    if not users:
+        return pd.DataFrame(columns=columns)
+
+    counts = train_counts.loc[users]
+    tier_ids = pd.qcut(counts, q=quantiles, labels=False, duplicates="drop")
+    n_bins = int(tier_ids.nunique())
+
+    if n_bins == 3:
+        labels = ["Light", "Medium", "Heavy"]
+    elif n_bins == 2:
+        labels = ["Light", "Heavy"]
+    elif n_bins == 1:
+        labels = ["All"]
+    else:
+        labels = [f"Tier {i + 1}" for i in range(n_bins)]
+
+    bins = sorted(tier_ids.unique())
+    bin_map = {b: labels[i] for i, b in enumerate(bins)}
+    user_segment = tier_ids.map(bin_map)
+
+    rows = []
+    for name, model in models.items():
+        res = evaluate(model, train, test, k=k, threshold=threshold, users=users)
+        res["segment"] = res["user_id"].map(user_segment)
+        for seg in [bin_map[b] for b in bins]:
+            sub = res[res["segment"] == seg]
+            seg_counts = counts.loc[sub["user_id"]]
+            rows.append({
+                "segment": seg,
+                "model": name,
+                "users_evaluated": len(sub),
+                "min_train_ratings": int(seg_counts.min()),
+                "max_train_ratings": int(seg_counts.max()),
+                f"precision@{k}": sub["precision"].mean(),
+                f"recall@{k}": sub["recall"].mean(),
+                f"hit_rate@{k}": sub["hit"].mean(),
+                f"ndcg@{k}": sub["ndcg"].mean(),
+                f"mrr@{k}": sub["mrr"].mean(),
+            })
+
+    return pd.DataFrame(rows, columns=columns)
+
+
+def user_genre_profile(ratings, movies, user_id, threshold=4):
+    """
+    Return a summary of a user's rating counts and liked genres.
+    """
+    if not 1 <= threshold <= 5:
+        raise ValueError("Threshold must be between 1 and 5.")
+
+    if user_id not in ratings["user_id"].values:
+        raise ValueError("User ID not found.")
+
+    user_ratings = ratings[ratings["user_id"] == user_id]
+    liked = user_ratings[user_ratings["rating"] >= threshold]
+    genre_cols = [c for c in GENRE_COLS if c in movies.columns]
+    merged = liked[["movie_id"]].merge(
+        movies[["movie_id", *genre_cols]], on="movie_id", how="inner"
+    )
+    genre_counts = merged[genre_cols].sum().sort_values(ascending=False)
+    genre_counts = genre_counts[genre_counts > 0].astype(int)
+
+    return {
+        "user_id": int(user_id),
+        "total_ratings": int(len(user_ratings)),
+        "positive_ratings": int(len(liked)),
+        "mean_rating": float(user_ratings["rating"].mean()),
+        "genre_counts": genre_counts,
+    }
+
+
+def compare_user_recommendations(models, ratings, movies, user_id, n=10, threshold=4):
+    """
+    Show top-n recommended movie titles side by side across models.
+    """
+    title_map = movies.set_index("movie_id")["title"]
+    columns = {}
+    for name, model in models.items():
+        recs = model.recommend(ratings, user_id=user_id, n=n, threshold=threshold)
+        if "title" in recs.columns:
+            titles = recs["title"].tolist()
+        else:
+            titles = recs["movie_id"].map(title_map).fillna("").tolist()
+        if len(titles) < n:
+            titles.extend([""] * (n - len(titles)))
+        columns[name] = titles[:n]
+
+    table = pd.DataFrame(columns, index=range(1, n + 1))
+    table.index.name = "rank"
+    return table
