@@ -23,9 +23,20 @@ class PopularityRecommender:
         self.movies = movies[["movie_id", "title"]].copy()
         self.min_ratings = min_ratings
 
+        # The ranking is the same for every user, so remember the last one.
+        # Evaluation calls recommend() once per user with the same training
+        # DataFrame; without this the ranking is rebuilt ~900 times.
+        self._cache_ratings = None
+        self._cache_threshold = None
+        self._cache_result = None
+
     def rank_movies(self, ratings, threshold=4):
         """
         Score every movie with at least min_ratings ratings.
+
+        The result is cached for the most recent (ratings, threshold) pair.
+        The cache is keyed on the DataFrame object itself, so don't modify a
+        ratings DataFrame in place between calls; pass a new one instead.
 
         Returns:
             DataFrame containing movie_id, title, num_ratings,
@@ -34,6 +45,16 @@ class PopularityRecommender:
         if not 1 <= threshold <= 5:
             raise ValueError("Threshold must be between 1 and 5.")
 
+        if ratings is self._cache_ratings and threshold == self._cache_threshold:
+            return self._cache_result.copy()
+
+        result = self._rank(ratings, threshold)
+        self._cache_ratings = ratings
+        self._cache_threshold = threshold
+        self._cache_result = result
+        return result.copy()
+
+    def _rank(self, ratings, threshold):
         stats = (
             ratings
             .assign(positive=ratings["rating"] >= threshold)

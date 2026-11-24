@@ -52,6 +52,7 @@ If you'd rather download the data by hand, get `ml-100k.zip` from
 | `src/content_based.py` | `ContentBasedRecommender`: genre cosine similarity |
 | `src/popularity.py` | `PopularityRecommender`: most-rated, most-liked baseline |
 | `src/hybrid.py` | `HybridRecommender`: weighted blend of the two scores |
+| `src/random_baseline.py` | `RandomRecommender`: random unrated movies, the floor every model should beat |
 | `src/evaluation.py` | Time-based train/test split and precision/recall/hit-rate/coverage metrics |
 | `tests/` | Unit tests (run with `pytest`) |
 | `download_data.py` | Script that fetches the dataset |
@@ -86,6 +87,15 @@ compare_models(
     train, test, k=10,
 )
 ```
+
+## Writing Up Results
+
+Both notebooks end with bracketed placeholders. To fill them in:
+
+1. Download the data (`python download_data.py`), then in Jupyter choose **Kernel → Restart & Run All** for `eda.ipynb` and `main.ipynb`. `main.ipynb` takes a few minutes because of the alpha sweep and robustness check.
+2. Read each placeholder's question and answer it from the tables and charts directly above it, quoting the numbers. Replace the whole bracketed text with your answer.
+3. Save the notebooks *with* their outputs and commit them, so the results show up on GitHub without anyone re-running anything.
+4. Update the abstract above: replace "will be evaluated" and the hypothesis with what you actually found.
 
 ## Running Tests
 

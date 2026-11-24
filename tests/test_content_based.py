@@ -76,3 +76,20 @@ def test_recommendation_scores_are_valid(sample_movies, sample_ratings):
     results = model.recommend(sample_ratings, user_id=1, n=10)
     assert results["similarity"].between(0, 1).all()
     assert results["similarity"].is_monotonic_decreasing
+
+def test_ties_broken_by_number_of_ratings(sample_movies):
+    # Movies 10 and 30 are both pure Action, so they tie on similarity for
+    # a user who liked a third Action movie. The more-rated one should win,
+    # even though it has the larger movie_id.
+    movies = pd.concat([
+        sample_movies,
+        sample_movies.iloc[[0]].assign(movie_id=50, title="Action Three")
+    ], ignore_index=True)
+    ratings = pd.DataFrame({
+        "user_id":  [1, 2, 3, 2],
+        "movie_id": [50, 30, 30, 10],
+        "rating":   [5, 4, 4, 4],
+    })
+    model = ContentBasedRecommender(movies)
+    results = model.recommend(ratings, user_id=1, n=2)
+    assert results["movie_id"].tolist() == [30, 10]
