@@ -6,7 +6,7 @@ This project compares popularity-based, content-based, and hybrid approaches to 
 
 All models were evaluated against a random baseline on an 80/20 time-based hold-out split (80,000 training ratings, 20,000 test ratings, 906 evaluated users), across an `alpha` sweep from 0.0 to 1.0, across multiple hold-out sizes (0.1, 0.2, 0.3), and across user activity levels. The hybrid recommender outperformed both standalone approaches across every accuracy and ranking metric: `alpha=0.3` reached the highest `precision@10` (0.0442) and `mrr@10` (0.1249), while `alpha=0.5` reached `precision@10` of 0.0425, `hit_rate@10` of 0.2903, `ndcg@10` of 0.0544, and `personalization` of 0.7394, compared with Popularity (`precision@10` 0.0350) and Content-based (`precision@10` 0.0243). Pure genre-based recommendations scored lower than Popularity on `precision@10` because 19 binary genre tags are fairly coarse, though Content-based achieved higher `mrr@10` (0.0837 vs. 0.0542), catalog `coverage` (0.2747 vs. 0.0309), and `personalization` (0.8833 vs. 0.2891).
 
-### Contributors
+### Contributors (Group 4)
 <ul>
   <li>Seth Auzenne</li>
   <li>Aditya Baisakh</li>
