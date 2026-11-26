@@ -8,8 +8,11 @@ recommendations are movies the user went on to rate positively.
 
 import numpy as np
 import pandas as pd
+from scipy.stats import wilcoxon
 
 from src.data import GENRE_COLS
+
+PER_USER_METRICS = ("precision", "recall", "hit", "ndcg", "mrr")
 
 
 def train_test_split_by_time(ratings, test_fraction=0.2):
@@ -285,4 +288,111 @@ def compare_user_recommendations(models, ratings, movies, user_id, n=10, thresho
 
     table = pd.DataFrame(columns, index=range(1, n + 1))
     table.index.name = "rank"
+    return table
+
+
+
+# Significance testing
+# - Paired: both models scored on the same users.
+# - Wilcoxon: per-user scores are mostly zeros and skewed so we need not normal distribution tests
+#  Holm: corrects p-values since we test 5 metrics at once
+
+
+def bootstrap_ci(values, n_boot=1000, ci=0.95, random_state=13):
+    """
+    Bootstrap a confidence interval to the mean of per-user scores
+    
+    Args:
+        values: One score per user.
+        n_boot: Number of bootstrap resamples
+        ci: Confidence level
+        random_state: reproducible seed
+        
+        Returns:
+            loats (mean, low, high)
+        """
+    values = np.asarray(values, dtype=float)
+    if values.size == 0:
+        raise ValueError("values must not be empty")
+                         
+    if not 0 < ci < 1:
+        raise ValueError("ci must be between 0-1")
+    
+    rng = np.random.default_rng(random_state)
+    idx = rng.integers(0, values.size, size=(n_boot, values.size))
+    boot_means = values[idx].mean(axis=1)
+
+    alpha = (1 - ci) / 2
+    low, high = np.percentile(boot_means, [100 * alpha, 100 * (1 - alpha)])
+    return float(values.mean()), float(low), float(high)
+
+
+def _holm(p_values):
+    p = np.asarray(p_values, dtype=float)
+    m = len(p)
+    order = np.argsort(p)
+    scaled = (m - np.arange(m)) * p[order]
+
+    adjusted = np.empty(m)
+    adjusted[order] = np.minimum(np.maximum.accumulate(scaled), 1.0)
+    return adjusted
+
+
+def paired_significance(
+        results_a, results_b, metrics=PER_USER_METRICS, n_boot=1000, ci=0.95, random_state=13
+):
+    """
+    Test whether two recs differ, metric by metric
+    
+    Args:
+        results_a: evaluate() output for model A
+        results_b: evaluate() output for model B
+        metrics: Per user metric columns to compare
+        n_boot: Bootstrap resamples for the Ci
+        ci: confidence level for the interval
+        random_state: seed for bootstrap
+        
+    returns:
+        Dataframe indexed by metric with mean_a, mean_b, mean_diff (A - B),
+        ci_low, ci_high, a_better, b_better, ties, p_value, and p_holm
+    """
+    metrics = list(metrics)
+    paired = results_a[["user_id", *metrics]].merge(
+        results_b[["user_id", *metrics]],
+        on="user_id",
+        how="inner",
+        suffixes=("_a", "_b"),
+    )
+    if paired.empty:
+        raise ValueError("The two results share no users.")
+    
+    rows = []
+    for metric in metrics:
+            a = paired[f"{metric}_a"].astype(float).to_numpy()
+            b = paired[f"{metric}_b"].astype(float).to_numpy()
+            diff = a - b
+
+            mean_diff, low, high = bootstrap_ci(
+                diff, n_boot=n_boot, ci=ci, random_state=random_state        
+            )
+            if np.all(diff == 0):
+                p_value = 1.0
+            else:
+                _, p_value = wilcoxon(diff)
+
+            rows.append({
+                "metric": metric,
+                "mean_a": a.mean(),
+                "mean_b": b.mean(),
+                "mean_diff": mean_diff,
+                "ci_low": low,
+                "ci_high": high,
+                "a_better": int((diff > 0).sum()),
+                "b_better": int((diff < 0).sum()),
+                "ties": int((diff == 0).sum()),
+                "p_value": p_value,
+            })
+
+    table = pd.DataFrame(rows).set_index("metric")
+    table["p_holm"] = _holm(table["p_value"])
     return table
