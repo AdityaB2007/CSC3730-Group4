@@ -56,6 +56,7 @@ If you'd rather download the data by hand, get `ml-100k.zip` from
 | `src/evaluation.py` | Time-based split, precision/recall/hit-rate/NDCG/MRR/coverage/personalization metrics, activity breakdowns, and paired significance testing (`paired_significance`, `bootstrap_ci`) |
 | `tests/` | Unit tests (run with `pytest`) |
 | `download_data.py` | Script that fetches the dataset |
+| `report.pdf` | Final project report |
 
 ## Results
 
